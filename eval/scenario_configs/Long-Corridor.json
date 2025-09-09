@@ -1,0 +1,6 @@
+{
+  "density": "low",
+  "occlusion": 0.1,
+  "dynamic": false,
+  "corridor": true
+}

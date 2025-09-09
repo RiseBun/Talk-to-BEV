@@ -1,0 +1,11 @@
+name: talk2bev
+channels: [conda-forge]
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - matplotlib
+  - shapely        # 可选
+  - casadi         # 可选
+  - ipopt          # 可选
+  - cyipopt        # 可选

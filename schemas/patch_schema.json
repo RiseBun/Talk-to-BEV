@@ -1,0 +1,12 @@
+{
+  "title": "Patch Schema (BEV/Spatial)",
+  "type": "object",
+  "properties": {
+    "spatial_masks": {
+      "type": "array"
+    },
+    "risk_map": {
+      "type": "object"
+    }
+  }
+}
