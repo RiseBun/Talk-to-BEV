@@ -1,0 +1,14 @@
+{
+  "spatial_masks": [
+    {
+      "id": "bar",
+      "shape": "polygon",
+      "mode": "keepout",
+      "points": [[2.0,-0.10],[3.0,-0.10],[3.0,0.10],[2.0,0.10]],
+      "margin_m": 0.25,
+      "hard": "hybrid",
+      "weight": 10.0,
+      "note": "横杆挡路"
+    }
+  ]
+}

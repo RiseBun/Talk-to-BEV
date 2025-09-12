@@ -1,0 +1,24 @@
+{
+  "spatial_masks": [
+    {
+      "id": "people_zone",
+      "shape": "polygon",
+      "mode": "keepout",
+      "points": [[1.6,2.2],[3.2,2.2],[3.2,3.9],[1.6,3.9]],
+      "margin_m": 0.20,
+      "hardness": "soft",
+      "weight": 10.0,
+      "note": "人群"
+    },
+    {
+      "id": "table",
+      "shape": "polygon",
+      "mode": "keepout",
+      "points": [[3.4,2.6],[4.6,2.6],[4.6,3.6],[3.4,3.6]],
+      "margin_m": 0.15,
+      "hardness": "soft",
+      "weight": 8.0,
+      "note": "桌子"
+    }
+  ]
+}
