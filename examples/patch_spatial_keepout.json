@@ -1,0 +1,13 @@
+{
+  "spatial_masks": [
+    {
+      "id": "wall1",
+      "shape": "polygon",
+      "mode": "keepout",
+      "hardness": "hard",
+      "points": [[2.2, -0.45], [2.8, -0.45], [2.8, 0.45], [2.2, 0.45]],
+      "margin_m": 0.10,
+      "weight": 0.0
+    }
+  ]
+}
