@@ -1,0 +1,40 @@
+{
+  "spatial_masks": [
+    {
+      "id": "people_big",
+      "shape": "polygon",
+      "mode": "keepout",
+      "points": [[1.6, 2.2],[3.2, 2.2],[3.2, 3.9],[1.6, 3.9]],
+      "margin_m": 0.25,
+      "hardness": "hybrid",
+      "weight": 10.0,
+      "note": "main crowd area"
+    },
+    {
+      "id": "table_small",
+      "shape": "polygon",
+      "mode": "keepout",
+      "points": [[1.9, 2.5],[2.9, 2.5],[2.9, 3.5],[1.9, 3.5]],
+      "margin_m": 0.20,
+      "hardness": "soft",
+      "weight": 6.0,
+      "note": "table core"
+    },
+    {
+      "id": "other_block",
+      "shape": "polygon",
+      "mode": "keepout",
+      "points": [[3.5, 2.6],[4.5, 2.6],[4.5, 3.6],[3.5, 3.6]],
+      "margin_m": 0.20,
+      "hardness": "hybrid",
+      "weight": 8.0,
+      "note": "second obstacle"
+    }
+  ],
+  "risk_map": {
+    "type": "grid",
+    "resolution_m": 0.1,
+    "origin_xy": [0.0, 0.0],
+    "values": "sample\\sample_risk.npy"
+  }
+}
