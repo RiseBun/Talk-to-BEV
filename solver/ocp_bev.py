@@ -312,7 +312,20 @@ def build_initial_guess(start, goal, bev_patch, N, dt, v_target=0.4):
         while dth < -np.pi: dth += 2*np.pi
         U_init[0, k] = np.clip(dv/dt, -0.4, 0.6)
         U_init[1, k] = np.clip(dth,     -0.2, 0.2)
+        # --- 让初值满足动力学：用 U_init 正向滚动生成 X_sim ---
+    X_sim = np.zeros_like(X_init)
+    X_sim[:, 0] = np.array(start)  # 严格从 start 出发
+    for k in range(N):
+        xk = ca.DM(X_sim[:, k])
+        uk = ca.DM(U_init[:, k])
+        xnext = AckermannModel().forward(xk, uk, dt).full().ravel()
+        X_sim[:, k+1] = np.array(xnext, dtype=float)
+
+    # 用 X_sim 覆盖几何轨迹，U 仍沿用几何生成的 U_init
+    X_init = X_sim
     return X_init, U_init
+
+    
 
 print("[OCP-BEV] v1.3 (geom-vmax, soft terminal, time-ref, jerk, L-BFGS)")
 
@@ -537,6 +550,32 @@ def build_and_solve(task: Dict[str, Any], bev_patch: Dict[str, Any] = None,
         lbg += [0.0, 0.0]; ubg += [ca.inf, ca.inf]
         g_list.append(ca.DM([a_max, d_max]) - U[:, k])
         lbg += [0.0, 0.0]; ubg += [ca.inf, ca.inf]
+    
+    # states bounds
+    x_min, x_max = -10.0, 10.0
+    y_min, y_max = -10.0, 10.0
+    th_min, th_max = -np.pi, np.pi
+    v_min,  v_max_state = 0.0, 1.8          # 需要允许倒车就把 v_min 改成负
+    d_min_s, d_max_s   = -0.6, 0.6
+
+    for k in range(N+1):
+        xk = X[:, k]
+        # x in [x_min, x_max]
+        g_list.append(xk[0] - x_min);      lbg.append(0.0); ubg.append(ca.inf)
+        g_list.append(x_max - xk[0]);      lbg.append(0.0); ubg.append(ca.inf)
+        # y in [y_min, y_max]
+        g_list.append(xk[1] - y_min);      lbg.append(0.0); ubg.append(ca.inf)
+        g_list.append(y_max - xk[1]);      lbg.append(0.0); ubg.append(ca.inf)
+        # theta in [th_min, th_max]
+        g_list.append(xk[2] - th_min);     lbg.append(0.0); ubg.append(ca.inf)
+        g_list.append(th_max - xk[2]);     lbg.append(0.0); ubg.append(ca.inf)
+        # v in [v_min, v_max_state]
+        g_list.append(xk[3] - v_min);      lbg.append(0.0); ubg.append(ca.inf)
+        g_list.append(v_max_state - xk[3]);lbg.append(0.0); ubg.append(ca.inf)
+        # delta in [d_min_s, d_max_s]
+        g_list.append(xk[4] - d_min_s);    lbg.append(0.0); ubg.append(ca.inf)
+        g_list.append(d_max_s - xk[4]);    lbg.append(0.0); ubg.append(ca.inf)
+
 
     # geometric speed cap
     v_max = float(task.get("vmax_geom", 1.0))
@@ -583,21 +622,25 @@ def build_and_solve(task: Dict[str, Any], bev_patch: Dict[str, Any] = None,
         plt.savefig(debug_save_init, bbox_inches="tight")
 
     # IPOPT options（收紧可行性）
-    opts = {
-    "ipopt.print_level": 0,
-    "print_time": 0,
-    "ipopt.max_iter": 1200,
-    "ipopt.tol": 1e-7,
-    "ipopt.acceptable_tol": 1e-5,
-    "ipopt.mu_strategy": "adaptive",
-    "ipopt.linear_solver": "mumps",
-    "ipopt.hessian_approximation": "limited-memory",
-    "ipopt.nlp_scaling_method": "gradient-based",
-    # 新增三条 ↓
-    "ipopt.honor_original_bounds": "yes",
-    "ipopt.bound_relax_factor": 1e-12,
-    "ipopt.constr_viol_tol": 1e-8,
+        opts = {
+        "ipopt.print_level": 0,
+        "print_time": 0,
+        "ipopt.max_iter": 1200,
+        "ipopt.tol": 1e-5,
+        "ipopt.acceptable_tol": 1e-3,
+        "ipopt.acceptable_iter": 10,
+        "ipopt.mu_strategy": "adaptive",
+        "ipopt.mu_oracle": "quality-function",
+        "ipopt.linear_solver": "mumps",
+        "ipopt.hessian_approximation": "limited-memory",
+        "ipopt.nlp_scaling_method": "gradient-based",
+        "ipopt.bound_push": 1e-6,
+        "ipopt.bound_frac": 1e-6,
+        "ipopt.constr_viol_tol": 1e-4,
+        "ipopt.diverging_iterates_tol": 1e20,
+        "ipopt.honor_original_bounds": "yes",
     }
+
 
     solver = ca.nlpsol("solver", "ipopt", nlp, opts)
        # ====== 求解 ======
