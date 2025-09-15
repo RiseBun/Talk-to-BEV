@@ -1,16 +1,16 @@
 {
   "start": [0.0, 0.0, 0.0, 0.0, 0.0],
   "goal":  [5.0, 0.0, 0.0, 0.0, 0.0],
-  "horizon": 60,
+  "horizon": 80,
   "dt": 0.05,
-  "weights": { "state": [2.5, 0.25, 0.2, 0.02, 0.02], "control": [0.10, 0.10] },
-  "terminal_scale": 2.5,
+  "weights": { "state": [2.5, 2.5, 0.2, 0.02, 0.02], "control": [0.10, 0.10] },
+  "terminal_scale": 3.0,
   "terminal_box_mode": "soft",
   "terminal_box_eps": 0.25,
   "u_rate_weight": 0.5,
   "no_backtrack": false,
   "vmin_warmup": 0.0,
-  "vmax_geom": 1.0,
+  "vmax_geom": 2.2,
   "masks": [
     { "id": "wall1", "type": "rect", "center": [2.5, 0.0], "size": [1.0, 0.90], "yaw": 0.0 }
   ],
