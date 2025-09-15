@@ -95,42 +95,51 @@ def rect_from_points(pts, extra_margin=0.0):
     cx, cy, hx, hy = aabb_from_polygon(pts, margin=0.0)
     return (cx, cy, hx + extra_margin, hy + extra_margin)
 
+# ---- robust segment-rectangle intersection ----
+def _point_in_aabb(px, py, cx, cy, hx, hy):
+    return (cx - hx) <= px <= (cx + hx) and (cy - hy) <= py <= (cy + hy)
+
+def _segments_intersect(p1, p2, q1, q2):
+    # standard orientation test
+    def orient(a, b, c):
+        return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+    def on_seg(a, b, c):
+        return (min(a[0], b[0]) - 1e-12 <= c[0] <= max(a[0], b[0]) + 1e-12 and
+                min(a[1], b[1]) - 1e-12 <= c[1] <= max(a[1], b[1]) + 1e-12)
+    o1 = orient(p1, p2, q1)
+    o2 = orient(p1, p2, q2)
+    o3 = orient(q1, q2, p1)
+    o4 = orient(q1, q2, p2)
+    if (o1 == 0 and on_seg(p1, p2, q1)) or (o2 == 0 and on_seg(p1, p2, q2)) \
+       or (o3 == 0 and on_seg(q1, q2, p1)) or (o4 == 0 and on_seg(q1, q2, p2)):
+        return True
+    return (o1 > 0) != (o2 > 0) and (o3 > 0) != (o4 > 0)
+
 def seg_intersects_rect(p0, p1, rect):
+    # rect: (cx, cy, hx, hy)
     cx, cy, hx, hy = rect
-    rx0, rx1 = cx - hx, cx + hx
-    ry0, ry1 = cy - hy, cy + hy
-    x0, y0 = p0
-    x1, y1 = p1
+    # 快速剔除 (两点都在同一侧外部且与盒无重叠投影)
+    if (p0[0] < cx - hx and p1[0] < cx - hx) or (p0[0] > cx + hx and p1[0] > cx + hx) \
+       or (p0[1] < cy - hy and p1[1] < cy - hy) or (p0[1] > cy + hy and p1[1] > cy + hy):
+        # 仍可能对角切到，所以不能直接返回 False；继续判断
+        pass
 
-    # 快速排斥
-    if max(x0, x1) < rx0 or min(x0, x1) > rx1 or max(y0, y1) < ry0 or min(y0, y1) > ry1:
-        return False
-
-    # 若任一端点已在矩形内，也算“相交”
-    if (rx0 <= x0 <= rx1 and ry0 <= y0 <= ry1) or (rx0 <= x1 <= rx1 and ry0 <= y1 <= ry1):
+    # 端点在盒内 -> 相交
+    if _point_in_aabb(p0[0], p0[1], cx, cy, hx, hy) or _point_in_aabb(p1[0], p1[1], cx, cy, hx, hy):
         return True
 
-    # 与四条边做精确相交判定
-    def seg_seg(a, b, c, d):
-        ax, ay = a; bx, by = b; cx, cy = c; dx, dy = d
-        v1x, v1y = bx - ax, by - ay
-        v2x, v2y = dx - cx, dy - cy
-        det = v1x * v2y - v1y * v2x
-        if abs(det) < 1e-12:  # 平行
-            return False
-        s = ((cx - ax) * v2y - (cy - ay) * v2x) / det
-        t = ((cx - ax) * v1y - (cy - ay) * v1x) / det
-        return 0.0 <= s <= 1.0 and 0.0 <= t <= 1.0
-
-    edges = [((rx0, ry0), (rx1, ry0)), ((rx1, ry0), (rx1, ry1)),
-             ((rx1, ry1), (rx0, ry1)), ((rx0, ry1), (rx0, ry0))]
+    # 与四条边相交？
+    r = [(cx-hx, cy-hy), (cx+hx, cy-hy), (cx+hx, cy+hy), (cx-hx, cy+hy)]
+    edges = [(r[0], r[1]), (r[1], r[2]), (r[2], r[3]), (r[3], r[0])]
     for e0, e1 in edges:
-        if seg_seg(p0, p1, e0, e1):
+        if _segments_intersect(p0, p1, e0, e1):
             return True
     return False
 
 
+
 def route_around_rects(start_xy, goal_xy, rects):
+    # 尝试从直线开始，遇撞则加“绕角”节点，最多迭代若干次
     pts = [tuple(start_xy), tuple(goal_xy)]
     for _ in range(24):
         collided = False
@@ -143,39 +152,58 @@ def route_around_rects(start_xy, goal_xy, rects):
                     hit = R
                     break
             if hit is None:
-                new_pts.append(b); continue
-
+                new_pts.append(b)
+                continue
             cx, cy, hx, hy = hit
-            # 让出更大的余量，防初值踩进 hard keepout
-            epsx, epsy = hx * 0.35 + 0.25, hy * 0.35 + 0.25
-            corners = [(cx - hx - epsx, cy - hy - epsy),
-                       (cx + hx + epsx, cy - hy - epsy),
-                       (cx + hx + epsx, cy + hy + epsy),
-                       (cx - hx - epsx, cy + hy + epsy)]
-            # 优先绕“窄边”
-            order = sorted(range(4), key=lambda k: (hy if k in (1,3) else hx))
-            best = None; bestlen = 1e18
-            for k in order:
-                c = corners[k]
+            eps = 0.35  # 比之前更大的安全偏置
+            candidates = [
+                (cx - hx - eps, cy - hy - eps),
+                (cx + hx + eps, cy - hy - eps),
+                (cx + hx + eps, cy + hy + eps),
+                (cx - hx - eps, cy + hy + eps),
+            ]
+            best = None
+            best_cost = 1e18
+            for c in candidates:
                 if seg_intersects_rect(a, c, hit) or seg_intersects_rect(c, b, hit):
                     continue
-                L = abs(a[0]-c[0]) + abs(a[1]-c[1]) + abs(c[0]-b[0]) + abs(c[1]-b[1])
-                if L < bestlen: best, bestlen = [a, c, b], L
+                # 简单 L1 距离做代价，避免不必要弯曲
+                cost = (abs(a[0]-c[0]) + abs(a[1]-c[1]) +
+                        abs(c[0]-b[0]) + abs(c[1]-b[1]))
+                if cost < best_cost:
+                    best = [a, c, b]
+                    best_cost = cost
             if best is None:
-                # 兜底：从长边外侧绕出去
-                sx = cx + (hx + epsx) * (1 if (b[0]-a[0]) >= 0 else -1)
-                sy = cy + (hy + epsy) * (1 if (b[1]-a[1]) >= 0 else -1)
-                best = [a, (sx, a[1]), (sx, sy), (b[0], sy), b]
-            new_pts += best[1:]; collided = True
+                # 实在绕不过，走上/下/左/右四向“凹”字
+                up    = (cx, cy + hy + eps)
+                down  = (cx, cy - hy - eps)
+                left  = (cx - hx - eps, cy)
+                right = (cx + hx + eps, cy)
+                for mid in (up, down, left, right):
+                    if not seg_intersects_rect(a, mid, hit) and not seg_intersects_rect(mid, b, hit):
+                        best = [a, mid, b]; break
+                if best is None:
+                    # 兜底：从四角里选离 a+b 最近的一角
+                    corners = [(cx - hx - eps, cy - hy - eps),
+                               (cx + hx + eps, cy - hy - eps),
+                               (cx + hx + eps, cy + hy + eps),
+                               (cx - hx - eps, cy + hy + eps)]
+                    corners.sort(key=lambda p: (abs(a[0]-p[0])+abs(a[1]-p[1])+
+                                                abs(b[0]-p[0])+abs(b[1]-p[1])))
+                    best = [a, corners[0], b]
+            new_pts += best[1:]
+            collided = True
         pts = new_pts
-        if not collided: break
+        if not collided:
+            break
 
-    # 去重/合并
+    # 简单抽稀
     simp = [pts[0]]
     for q in pts[1:]:
-        if abs(q[0]-simp[-1][0]) + abs(q[1]-simp[-1][1]) > 1e-4:
+        if abs(q[0]-simp[-1][0]) + abs(q[1]-simp[-1][1]) > 1e-3:
             simp.append(q)
     return simp
+
 
 
 def catmull_rom(points, samples_per_seg=12):
@@ -258,7 +286,7 @@ def build_initial_guess(start, goal, bev_patch, N, dt, v_target=0.4):
             pts = m.get("points", [])
             if not pts:
                 continue
-            infl = float(m.get("margin_m", 0.2)) + 0.30
+            infl = float(m.get("margin_m", 0.2)) + 0.45
             rects.append(rect_from_points(pts, extra_margin=infl))
     # NOTE: 如果你想让 task.masks 也纳入初值几何避障，可以在 run_example.py 里把 task 先转 polygon 再传进来
 
@@ -572,13 +600,56 @@ def build_and_solve(task: Dict[str, Any], bev_patch: Dict[str, Any] = None,
     }
 
     solver = ca.nlpsol("solver", "ipopt", nlp, opts)
+       # ====== 求解 ======
     sol = solver(lbg=ca.vertcat(*lbg), ubg=ca.vertcat(*ubg), x0=x0_guess)
+    stats = solver.stats()
 
     z = sol["x"].full().ravel()
     Xsol = z[: (nx * (N + 1))].reshape((nx, N + 1))
     Usol = z[(nx * (N + 1)) :].reshape((nu, N))
 
     print(f"[OCP-BEV] xN=({float(Xsol[0,-1]):.3f},{float(Xsol[1,-1]):.3f})")
+    print(f"[DEBUG] IPOPT return_status: {stats.get('return_status','?')}")
+
+    # ====== 统一的可行性“自检” ======
+    try:
+        # g_fun(vars_) = g(x) 用于评估约束值
+        g_fun = ca.Function("g_fun", [vars_], [g])
+        g_val = g_fun(sol["x"]).full().ravel()
+
+        # 根据 lbg/ubg 区分：等式约束 (lbg==ubg) 与 “>=0”/“<=0”不等式
+        # 我们关心：等式的最大绝对误差；以及 “>=0” 约束的最小裕度（最小值）
+        eq_max_abs = 0.0
+        ineq_min_margin = float("+inf")
+
+        # 注意：列表 lbg/ubg 里可能含 inf
+        for gi, lb, ub in zip(g_val, lbg, ubg):
+            lb = float(lb)
+            ub = float(ub)
+            if np.isfinite(lb) and np.isfinite(ub) and abs(ub - lb) < 1e-12:
+                # 等式约束：g == lb == ub
+                eq_max_abs = max(eq_max_abs, abs(gi - lb))
+            else:
+                # 不等式。常见建模是 g >= 0（即 lb=0, ub=+inf）
+                # 我们统计 g 的最小值作为“最小裕度”（负值表示穿约束）
+                if (abs(lb) < 1e-12) and (not np.isfinite(ub)):
+                    ineq_min_margin = min(ineq_min_margin, float(gi))
+                else:
+                    # 其它形式也报一下最紧违约程度（到最近边界的距离）
+                    # viol < 0 表示违约
+                    to_lb = gi - lb if np.isfinite(lb) else float("+inf")
+                    to_ub = ub - gi if np.isfinite(ub) else float("+inf")
+                    viol = min(to_lb, to_ub)
+                    ineq_min_margin = min(ineq_min_margin, float(viol))
+
+        print(f"[CHECK] equality max |violation| = {eq_max_abs:.3e}")
+        if ineq_min_margin == float("+inf"):
+            print("[CHECK] no inequality constraints detected")
+        else:
+            print(f"[CHECK] inequality min margin  = {ineq_min_margin:.4f}  (negative => crossed)")
+
+    except Exception as e:
+        print("[WARN] feasibility check failed:", repr(e))
 
     # ====== 结果输出 ======
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
@@ -593,72 +664,32 @@ def build_and_solve(task: Dict[str, Any], bev_patch: Dict[str, Any] = None,
         import matplotlib.pyplot as plt
         plt.figure()
         plt.plot(Xsol[0, :], Xsol[1, :], marker=".")
+
         # 画 patch masks
         if bev_patch:
             masks = bev_patch.get("spatial_masks") or []
             if bev_patch.get("risk_map"):
                 masks += risk_to_masks(bev_patch["risk_map"])
             for m in masks:
-                if str(m.get("shape", "polygon")) != "polygon":
+                if str(m.get("shape", "polygon")).lower() != "polygon":
                     continue
                 pts = m.get("points", [])
                 if pts:
                     xs = [p[0] for p in pts] + [pts[0][0]]
                     ys = [p[1] for p in pts] + [pts[0][1]]
                     plt.plot(xs, ys)
+
         # 画 task rect->poly
-        for m in task.get("masks", []) or []:
-            if str(m.get("type","rect")).lower()=="rect":
+        for m in (task.get("masks") or []):
+            if str(m.get("type","rect")).lower() == "rect":
                 poly = rect_to_poly(m.get("center",[0,0]), m.get("size",[1,1]), m.get("yaw",0.0))
                 xs = [p[0] for p in poly] + [poly[0][0]]
                 ys = [p[1] for p in poly] + [poly[0][1]]
                 plt.plot(xs, ys)
+
         plt.axis("equal")
         plt.title("Trajectory with BEV masks")
         os.makedirs(os.path.dirname(out_png), exist_ok=True)
         plt.savefig(out_png, bbox_inches="tight")
-
-    # ====== 可行性“自检”报告（避免写出穿墙解而不自知）======
-    try:
-        # 只对 keepout:hard 和 task.costs barrier 做基本检查
-        def mask_aabb(mm):
-            pts = mm.get("points", [])
-            if not pts: return None
-            return aabb_from_polygon(pts, margin=0.0)
-
-        min_violation = 0.0
-        # hard keepout
-        for m in masks_poly:
-            if str(m.get("mode","keepout")).lower()=="keepout" and str(m.get("hardness","soft")).lower()=="hard":
-                A = mask_aabb(m)
-                if A is None: continue
-                cx, cy, hx, hy = A
-                base_margin = float(m.get("margin_m", 0.2))
-                for k in range(N+1):
-                    sd = float(np.hypot(max(abs(Xsol[0,k]-cx)-hx,0.0), max(abs(Xsol[1,k]-cy)-hy,0.0)))
-                    inside = max(max(abs(Xsol[0,k]-cx)-hx, abs(Xsol[1,k]-cy)-hy), 0.0)
-                    sd_signed = (sd if inside==0.0 else -abs(inside))
-                    margin_k = base_margin + 0.25*abs(Xsol[3,k])
-                    val = sd_signed - margin_k
-                    min_violation = min(min_violation, val)
-        # barrier（按 r=0.2 经验检查）
-        for c in task_costs:
-            if str(c.get("type","")).lower()=="bev_mask_barrier":
-                mref = None
-                mid = c.get("mask_id", None)
-                for mm in masks_poly:
-                    if str(mm.get("id",""))==str(mid): mref = mm; break
-                if mref is None: continue
-                A = mask_aabb(mref); 
-                if A is None: continue
-                cx, cy, hx, hy = A
-                r = float((c.get("barrier", {}) or {}).get("radius", 0.20))
-                for k in range(N+1):
-                    sd = float(np.hypot(max(abs(Xsol[0,k]-cx)-hx,0.0), max(abs(Xsol[1,k]-cy)-hy,0.0)))
-                    min_violation = min(min_violation, sd - r)
-        if min_violation < -1e-4:
-            print(f"[WARN] feasibility check: MIN violation = {min_violation:.4f} (negative means constraint crossed)")
-    except Exception as e:
-        print("[WARN] feasibility check failed:", repr(e))
 
     return Xsol, Usol
